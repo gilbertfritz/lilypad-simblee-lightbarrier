@@ -5,9 +5,9 @@
 
 const bool DEBUG = true;
 
-const int DURATION_PAIRING_MODE_MS = SECONDS(10);
+const int DURATION_PAIRING_MODE_MS = SECONDS(20);
 const int DURATION_CONNECTED_MODE_MS = SECONDS(30);
-const int INTERVAL_CHECK = SECONDS(12);
+const int INTERVAL_CHECK = SECONDS(20);
 
 
 const int button = 15; // The Simblee BOB (WRL-13632) has a button on pin 3.
@@ -23,14 +23,13 @@ uint8_t textID;
 boolean isBirdInside;
 boolean wasBirdInside;
 
-
-
 Timer pairingModeTimer;
 boolean pairingMode = false;
 Timer connectedModeTimer;
 boolean connectedMode = false;
 
 int count = 0;
+
 
 void setup()
 {
@@ -57,13 +56,16 @@ void setup()
 
 void loop()
 {
+  Simblee_resetPinWake(button);
+
   //CHECK BIRD
+  debug("checking");
   isBirdInside = checkBirdInside();
   if ( wasBirdInside && !isBirdInside) {
     wasBirdInside = false;
     count++;
-    Serial.print("bird is out! ");
-    Serial.println(count);
+    debug("bird is out! ", false);
+    debug(count);
     //digitalWrite(led, HIGH);
   } else if ( !wasBirdInside && isBirdInside) {
     //digitalWrite(led, LOW);
@@ -82,26 +84,41 @@ void loop()
     connectedModeTimer.update();
   }
 
+  //SLEEP MODE
   if (!pairingMode && !connectedMode && digitalRead(button) != HIGH) {
-    Serial.println("GOING TO SLEEP");
-    delay(200);
-    Simblee_ULPDelay(INTERVAL_CHECK);
+    goToSleep();
   }
 
   SimbleeForMobile.process();
 }
 
+
+int buttonCallback( uint32_t button) {
+  Simblee_resetPinWake(button);
+  enablePairingMode();
+}
+
+void goToSleep() {
+  debug("GOING TO SLEEP");
+  Simblee_pinWakeCallback(button, HIGH, buttonCallback);
+  delay(200);
+  Simblee_ULPDelay(INTERVAL_CHECK);
+}
+
 void SimbleeForMobile_onConnect() {
-  Serial.println("CONNECTED");
-  enableConnectedMode();
+  if ( pairingMode) {
+    debug("CONNECTED");
+    disablePairingMode();
+    enableConnectedMode();
+  }
 }
 
 void SimbleeForMobile_onDisconnect() {
-  Serial.println("DISCONNECTED");
+  debug("DISCONNECTED");
 }
 
 void enablePairingMode() {
-  Serial.println("pairing mode ON");
+  debug("pairing mode ON");
   digitalWrite(led, HIGH);
   pairingMode = true;
   pairingModeTimer.after(DURATION_PAIRING_MODE_MS, disablePairingMode);
@@ -109,37 +126,48 @@ void enablePairingMode() {
 
 //disables pairingmode
 void disablePairingMode() {
-  Serial.println("pairing mode OFF");
+  debug("pairing mode OFF");
   pairingMode = false;
   digitalWrite(led, LOW);
 }
 
 void enableConnectedMode() {
-  Serial.println("connected mode ON");
-  disablePairingMode();
+  debug("connected mode ON");
   connectedModeTimer.after(DURATION_CONNECTED_MODE_MS, disableConnectedMode);
   connectedMode = true;
+  digitalWrite(led, HIGH);
 }
 
 //disables pairingmode
 void disableConnectedMode() {
-  Serial.println("connected mode OFF");
+  debug("connected mode OFF");
   connectedMode = false;
   digitalWrite(led, LOW);
 }
 
 void updateUI() {
-  if (SimbleeForMobile.updatable)
-  {
-    Serial.println("updating ui value to ");
-    Serial.print(count);
-    SimbleeForMobile.updateValue(textID, count);
-    disableConnectedMode();
+  int wait = 0;
+  while ( !SimbleeForMobile.updatable) {
+    SimbleeForMobile.process();
+    digitalWrite(led, LOW);
+    delay(200);
+    digitalWrite(led, HIGH);
+    delay(200);
+    wait++;
+    if ( wait > 10) {
+      return;
+    }
   }
+
+  debug("updating ui value to ", false);
+  debug(count);
+  SimbleeForMobile.updateValue(textID, count);
+  disableConnectedMode();
 }
 
 boolean checkBirdInside() {
   int sensorValue = analogRead(sensor);
+  Serial.println( sensorValue );
   if ( sensorValue <= THRESHOLD) {
     return false;
   }
@@ -203,7 +231,7 @@ void ui_event(event_t &event)
 //prints message to serialport
 void debug(String msg, boolean endl) {
   if ( DEBUG) {
-    Serial.println(msg);
+    Serial.print(msg);
     if ( endl) {
       Serial.println();
     }
@@ -211,7 +239,8 @@ void debug(String msg, boolean endl) {
 }
 
 void debug(int num, boolean endl) {
-  debug("" + num, true);
+  String numstr = String(num);
+  debug(numstr, endl);
 }
 
 void debug(int num) {
